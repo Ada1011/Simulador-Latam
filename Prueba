@@ -1,0 +1,369 @@
+import javax.swing.*;
+import javax.swing.border.LineBorder;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.List;
+
+public class NodeSimulationSwing extends JFrame {
+
+    private final List<SimNode> nodes = new ArrayList<>();
+    private boolean simulationRunning = false;
+
+    private Timer heartbeatTimer;
+    private Timer failureTimer;
+    private Timer taskAssignmentTimer;
+
+    private JPanel nodesPanel;
+    private JTextArea reportArea;
+
+    private JButton startBtn;
+    private JButton stopBtn;
+    private JButton resetBtn;
+
+    private final Random random = new Random();
+
+    private static class SimNode {
+        String name;
+        String location;
+        boolean active = true;
+
+        JPanel card;
+        JLabel heartbeatLabel;
+        JLabel statusLabel;
+        JLabel taskIndicator;
+
+        private static final Color COLOR_ACTIVE = new Color(15, 255, 15);
+        private static final Color COLOR_FAILED = new Color(255, 51, 51);
+        private static final Color COLOR_HEARTBEAT_INACTIVE = new Color(204,159,159);
+        private static final Color COLOR_HEARTBEAT_ACTIVE = new Color(15, 255, 15);
+
+        SimNode(String name, String location) {
+            this.name = name;
+            this.location = location;
+            buildCard();
+        }
+
+        private void buildCard() {
+            card = new JPanel();
+            card.setPreferredSize(new Dimension(160,160));
+            card.setBackground(new Color(43, 53, 100));
+            card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+            card.setBorder(BorderFactory.createEmptyBorder(15,15,15,15));
+
+            JLabel nameLabel = new JLabel(name);
+            nameLabel.setForeground(Color.WHITE);
+            nameLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+            nameLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            nameLabel.setBorder(BorderFactory.createEmptyBorder(0,0,5,0));
+
+            JLabel locationLabel = new JLabel(location);
+            locationLabel.setForeground(new Color(170, 170, 170));
+            locationLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            locationLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            locationLabel.setBorder(BorderFactory.createEmptyBorder(0,0,10,0));
+
+            heartbeatLabel = new JLabel("\u25CF");
+            heartbeatLabel.setFont(new Font("Segoe UI", Font.PLAIN, 40));
+            heartbeatLabel.setForeground(COLOR_HEARTBEAT_INACTIVE);
+            heartbeatLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            heartbeatLabel.setBorder(BorderFactory.createEmptyBorder(0,0,10,0));
+
+            statusLabel = new JLabel("ACTIVO");
+            statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 14));
+            statusLabel.setForeground(COLOR_ACTIVE);
+            statusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            statusLabel.setBorder(BorderFactory.createEmptyBorder(0,0,8,0));
+
+            taskIndicator = new JLabel("Asignando...");
+            taskIndicator.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            taskIndicator.setForeground(new Color(240, 165, 0));
+            taskIndicator.setAlignmentX(Component.CENTER_ALIGNMENT);
+            taskIndicator.setVisible(false);
+
+            card.add(nameLabel);
+            card.add(locationLabel);
+            card.add(heartbeatLabel);
+            card.add(statusLabel);
+            card.add(Box.createVerticalGlue());
+            card.add(taskIndicator);
+        }
+
+        void setActive(boolean active) {
+            this.active = active;
+            if (active) {
+                heartbeatLabel.setForeground(COLOR_HEARTBEAT_ACTIVE);
+                statusLabel.setForeground(COLOR_ACTIVE);
+                statusLabel.setText("ACTIVO");
+                card.setOpaque(true);
+                card.setBackground(new Color(43, 53, 100));
+                card.setBorder(BorderFactory.createEmptyBorder(15,15,15,15));
+                card.setEnabled(true);
+                card.setPreferredSize(new Dimension(160,160));
+                card.setToolTipText(null);
+            } else {
+                heartbeatLabel.setForeground(COLOR_HEARTBEAT_INACTIVE);
+                statusLabel.setForeground(COLOR_FAILED);
+                statusLabel.setText("CAÍDO");
+                card.setOpaque(true);
+                card.setBackground(new Color(61, 61, 61));
+                card.setBorder(BorderFactory.createCompoundBorder(
+                        BorderFactory.createEmptyBorder(15,15,15,15),
+                        new LineBorder(new Color(255, 70, 70), 1)
+                ));
+                card.setEnabled(false);
+                card.setToolTipText(name + " está caído");
+            }
+            card.repaint();
+        }
+
+        void pulseHeartbeat() {
+            if (!active) return;
+            // simple pulse effect by changing color quickly
+            heartbeatLabel.setForeground(Color.GREEN.brighter());
+            Timer t = new Timer(300, e -> heartbeatLabel.setForeground(COLOR_HEARTBEAT_ACTIVE));
+            t.setRepeats(false);
+            t.start();
+        }
+
+        void setTaskAssigned(boolean assigned) {
+            taskIndicator.setVisible(assigned);
+        }
+    }
+
+    public NodeSimulationSwing() {
+        setTitle("Simulación Nodos Distribuidos Latinoamérica");
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setSize(960, 700);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout());
+
+        // Header
+        JLabel header = new JLabel("Simulación Visual de Red de Nodos Distribuidos en Latinoamérica", SwingConstants.CENTER);
+        header.setFont(new Font("Segoe UI", Font.BOLD, 26));
+        header.setForeground(new Color(240, 165, 0));
+        header.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
+        add(header, BorderLayout.NORTH);
+
+        // Nodes container
+        nodesPanel = new JPanel();
+        nodesPanel.setBackground(new Color(30, 30, 47));
+        nodesPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 15, 15));
+        add(nodesPanel, BorderLayout.CENTER);
+
+        // Controls panel
+        JPanel controlsPanel = new JPanel();
+        controlsPanel.setBackground(new Color(30, 30, 47));
+        controlsPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 15, 10));
+
+        startBtn = createButton("Iniciar Simulación");
+        stopBtn = createButton("Detener Simulación");
+        resetBtn = createButton("Reiniciar");
+
+        stopBtn.setEnabled(false);
+        resetBtn.setEnabled(false);
+
+        controlsPanel.add(startBtn);
+        controlsPanel.add(stopBtn);
+        controlsPanel.add(resetBtn);
+
+        add(controlsPanel, BorderLayout.SOUTH);
+
+        // Report panel
+        reportArea = new JTextArea(10, 80);
+        reportArea.setEditable(false);
+        reportArea.setBackground(new Color(78, 89, 203));
+        reportArea.setForeground(new Color(204, 204, 204));
+        reportArea.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        reportArea.setLineWrap(true);
+        reportArea.setWrapStyleWord(true);
+        reportArea.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
+
+        JScrollPane scrollPane = new JScrollPane(reportArea);
+        scrollPane.setPreferredSize(new Dimension(900, 220));
+        scrollPane.getViewport().setBackground(new Color(78, 89, 203));
+
+        JPanel reportPanelWrapper = new JPanel();
+        reportPanelWrapper.setBackground(new Color(30, 30, 47));
+        reportPanelWrapper.add(scrollPane);
+
+        add(reportPanelWrapper, BorderLayout.PAGE_END);
+
+        initializeNodes();
+
+        // Add node cards to container
+        for (SimNode node : nodes) {
+            nodesPanel.add(node.card);
+        }
+
+        // Action Listeners
+        startBtn.addActionListener(e -> startSimulation());
+        stopBtn.addActionListener(e -> stopSimulation());
+        resetBtn.addActionListener(e -> resetSimulation());
+    }
+
+    private JButton createButton(String text) {
+        JButton btn = new JButton(text);
+        btn.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        btn.setBackground(new Color(240, 165, 0));
+        btn.setForeground(new Color(30, 30, 47));
+        btn.setFocusPainted(false);
+        btn.setPreferredSize(new Dimension(140, 40));
+        btn.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                btn.setBackground(new Color(212, 143, 0));
+            }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                btn.setBackground(new Color(240, 165, 0));
+            }
+        });
+        return btn;
+    }
+
+    private void initializeNodes() {
+        nodes.clear();
+        nodes.add(new SimNode("Nodo 1", "Ciudad de México, México"));
+        nodes.add(new SimNode("Nodo 2", "São Paulo, Brasil"));
+        nodes.add(new SimNode("Nodo 3", "Buenos Aires, Argentina"));
+        nodes.add(new SimNode("Nodo 4", "Bogotá, Colombia"));
+        nodes.add(new SimNode("Nodo 5", "Santiago, Chile"));
+
+        // Reset nodes active status
+        for (SimNode node : nodes) {
+            node.setActive(true);
+            node.setTaskAssigned(false);
+        }
+    }
+
+    private void logReport(String msg, String type) {
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("HH:mm:ss");
+        String time = LocalTime.now().format(dtf);
+        String line = "[" + time + "] " + msg + "\n";
+
+        switch(type) {
+            case "fail":
+                line = "<FAIL> " + line;
+                break;
+            case "assign":
+                line = "<ASSIGN> " + line;
+                break;
+            case "reassign":
+                line = "<REASSIGN> " + line;
+                break;
+            default:
+                break;
+        }
+
+        reportArea.append(line);
+        reportArea.setCaretPosition(reportArea.getDocument().getLength());
+    }
+
+    private void startSimulation() {
+        if (simulationRunning) return;
+        simulationRunning = true;
+
+        startBtn.setEnabled(false);
+        stopBtn.setEnabled(true);
+        resetBtn.setEnabled(true);
+
+        logReport("Simulación iniciada.", "info");
+
+        heartbeatTimer = new Timer(1500, e -> {
+            for (SimNode node : nodes) {
+                if (node.active) {
+                    node.pulseHeartbeat();
+                    node.setActive(true);
+                }
+            }
+        });
+        heartbeatTimer.start();
+
+        failureTimer = new Timer(2000, e -> {
+            for (SimNode node : nodes) {
+                if (simulationRunning && node.active && random.nextDouble() < 0.15) {
+                    failNode(node);
+                }
+            }
+        });
+        failureTimer.start();
+
+        taskAssignmentTimer = new Timer(2500, e -> assignTasks());
+        taskAssignmentTimer.start();
+    }
+
+    private void stopSimulation() {
+        if (!simulationRunning) return;
+        simulationRunning = false;
+        startBtn.setEnabled(true);
+        stopBtn.setEnabled(false);
+        resetBtn.setEnabled(true);
+
+        logReport("Simulación detenida.", "info");
+
+        if (heartbeatTimer != null) heartbeatTimer.stop();
+        if (failureTimer != null) failureTimer.stop();
+        if (taskAssignmentTimer != null) taskAssignmentTimer.stop();
+
+        for (SimNode node : nodes) {
+            node.setTaskAssigned(false);
+        }
+    }
+
+    private void resetSimulation() {
+        stopSimulation();
+
+        logReport("Simulación reiniciada.", "info");
+
+        for (SimNode node : nodes) {
+            node.setActive(true);
+            node.setTaskAssigned(false);
+        }
+
+        resetBtn.setEnabled(false);
+        reportArea.setText("");
+    }
+
+    private void failNode(SimNode node) {
+        if (!node.active) return;
+        node.setActive(false);
+        logReport("Fallo detectado en " + node.name + " (" + node.location + ")", "fail");
+    }
+
+    private void assignTasks() {
+        if (!simulationRunning) return;
+
+        List<SimNode> activeNodes = new ArrayList<>();
+        for (SimNode node : nodes) {
+            if (node.active) activeNodes.add(node);
+        }
+
+        if (activeNodes.isEmpty()) {
+            logReport("No hay nodos activos disponibles para asignar tareas.", "fail");
+            return;
+        }
+
+        SimNode assignedNode = activeNodes.get(random.nextInt(activeNodes.size()));
+
+        for (SimNode node : nodes) {
+            node.setTaskAssigned(node == assignedNode);
+        }
+
+        logReport("Tarea asignada a " + assignedNode.name + " (" + assignedNode.location + ")", "assign");
+
+        for (SimNode node : nodes) {
+            if (!node.active) {
+                logReport("Reasignando tareas de " + node.name + " a otros nodos activos.", "reassign");
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            NodeSimulationSwing app = new NodeSimulationSwing();
+            app.setVisible(true);
+        });
+    }
+}
+
